@@ -1,0 +1,10 @@
+dist/
+build/
+*.spec
+__pycache__/
+*.pyc
+.DS_Store
+.env
+vault.json
+*.app
+assets/logo.png

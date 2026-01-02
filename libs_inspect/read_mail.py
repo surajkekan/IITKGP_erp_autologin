@@ -1,0 +1,45 @@
+import logging
+import time
+import base64
+from googleapiclient.discovery import build
+import requests
+from iitkgp_erp_login.erp import ErpLoginError, LoginDetails, request_otp
+from iitkgp_erp_login.utils import generate_token
+from iitkgp_erp_login.logger import logger
+
+SUBJECT = "OTP for Sign In in ERP Portal of IIT Kharagpur"
+
+def getMailID(service):
+    query = f"subject:{SUBJECT}"
+    results = service.users().messages().list(userId="me", q=query, maxResults=1).execute()
+    messages = results.get("messages", [])
+    
+    if messages:
+        message = service.users().messages().get(userId="me", id=messages[0]["id"]).execute()
+        return message["id"]
+    
+    return None
+
+def getOTP(OTP_CHECK_INTERVAL,headers: dict[str, str], session: requests.Session, login_details: LoginDetails, log: bool = False):
+    creds = generate_token()
+    service = build("gmail", "v1", credentials=creds)
+    
+    latest_mail_id = getMailID(service)
+    request_otp(headers=headers, session=session, login_details=login_details, log=log)
+    if log: logger.info(" Waiting for OTP ...")
+    
+    OTP_CHECK_TIMEOUT = time.time() + 60 * 10
+    while True:
+        if (mail_id := getMailID(service)) != latest_mail_id:
+            break
+        if time.time() > OTP_CHECK_TIMEOUT:
+            raise ErpLoginError(f"Timed out while fetching OTP")
+        time.sleep(OTP_CHECK_INTERVAL)
+    
+    mail = service.users().messages().get(userId="me", id=mail_id).execute()
+    if "body" in mail["payload"]:
+        body_data = mail["payload"]["body"]["data"]
+        decoded_body_data = base64.urlsafe_b64decode(body_data).decode("utf-8")
+        otp = [part for part in decoded_body_data.split() if part.isdigit()][-1]
+
+        return otp

@@ -1,0 +1,7 @@
+customtkinter
+cryptography
+requests
+pillow
+selenium
+webdriver_manager
+iitkgp-erp-login
