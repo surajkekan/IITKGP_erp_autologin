@@ -13,6 +13,8 @@ class SetupFrame(ctk.CTkFrame):
         
         self.confirm_entry = ctk.CTkEntry(self, placeholder_text="Confirm PIN", show="*")
         self.confirm_entry.pack(pady=10)
+        self.confirm_entry.bind("<Return>", lambda e: self.submit())
+        self.pin_entry.bind("<Return>", lambda e: self.confirm_entry.focus())
         
         self.btn = ctk.CTkButton(self, text="Set PIN", command=self.submit)
         self.btn.pack(pady=20)
@@ -44,6 +46,7 @@ class LockFrame(ctk.CTkFrame):
         
         self.pin_entry = ctk.CTkEntry(self, placeholder_text="Enter PIN to Unlock", show="*")
         self.pin_entry.pack(pady=10)
+        self.pin_entry.bind("<Return>", lambda e: self.submit())
         
         self.btn = ctk.CTkButton(self, text="Unlock", command=self.submit)
         self.btn.pack(pady=20)

@@ -59,7 +59,19 @@ class ERPClient:
             logger.error(f"IMAP Init Error: {e}")
             return 0
 
-    def _wait_for_new_otp(self, email_addr, app_password, previous_id: int) -> Optional[str]:
+    def _delete_email(self, email_addr, app_password, msg_id: int):
+        try:
+            logger.info(f"Deleting OTP email (ID: {msg_id})...")
+            mail = self._connect_imap(email_addr, app_password)
+            mail.store(str(msg_id), "+FLAGS", "\\Deleted")
+            mail.expunge()
+            mail.close()
+            mail.logout()
+            logger.info("OTP email deleted successfully.")
+        except Exception as e:
+            logger.error(f"Failed to delete email: {e}")
+
+    def _wait_for_new_otp(self, email_addr, app_password, previous_id: int) -> tuple[Optional[str], Optional[int]]:
         """Fetch NEW OTP using IMAP (checking for ID > previous_id)."""
         logger.info(f"Waiting for OTP email newer than ID {previous_id}...")
         
@@ -74,6 +86,7 @@ class ERPClient:
                 
                 found_new = False
                 otp = None
+                latest_id = None
                 
                 if messages and messages[0]:
                     ids = messages[0].split()
@@ -106,14 +119,14 @@ class ERPClient:
                 
                 if found_new and otp:
                     logger.info(f"DEBUG - Extracted OTP: {otp}")
-                    return otp
+                    return otp, latest_id
                     
             except Exception as e:
                 logger.error(f"IMAP Polling Error: {e}")
             
             time.sleep(4)
             
-        return None
+        return None, None
 
     def login_with_credentials(self, creds: Dict, status_callback=None) -> bool:
         """
@@ -159,9 +172,10 @@ class ERPClient:
             
             # 4. Fetch OTP
             otp = None
+            msg_id = None
             if creds.get('google_email') and creds.get('google_app_password'):
                  if status_callback: status_callback("Listening for new OTP email...")
-                 otp = self._wait_for_new_otp(creds['google_email'], creds['google_app_password'], prev_email_id)
+                 otp, msg_id = self._wait_for_new_otp(creds['google_email'], creds['google_app_password'], prev_email_id)
             
             if not otp:
                  raise ValueError("Could not fetch OTP via IMAP. Email/AppPassword missing or retrieval failed.")
@@ -175,6 +189,11 @@ class ERPClient:
             # 6. Verify
             if self.is_session_alive():
                  if status_callback: status_callback("Login Successful!")
+                 
+                 # Delete OTP Email
+                 if msg_id and creds.get('google_email') and creds.get('google_app_password'):
+                     self._delete_email(creds['google_email'], creds['google_app_password'], msg_id)
+                     
                  return True
             else:
                  if status_callback: status_callback("Login flow finished but session not alive.")

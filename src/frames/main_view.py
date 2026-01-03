@@ -2,11 +2,12 @@ import logging
 import customtkinter as ctk
 import threading
 import webbrowser
+import os
+import shutil
 from tkinter import messagebox
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from DrissionPage import ChromiumPage, ChromiumOptions
+
 
 class MainViewFrame(ctk.CTkFrame):
     def __init__(self, parent, controller):
@@ -23,13 +24,39 @@ class MainViewFrame(ctk.CTkFrame):
         self._init_dashboard()
         self._init_settings()
         
+        self.is_verifying = False
+    
+    def open_google_help(self):
+        webbrowser.open("https://support.google.com/mail/answer/185833?hl=en")
+
+    def run_clear_cache(self):
+        if not messagebox.askyesno("Confirm", "This will delete downloaded Chrome drivers. They will be re-downloaded next time. Continue?"):
+            return
+            
+        try:
+            # Common locations
+            paths = [
+                os.path.expanduser("~/.wdm"),
+                os.path.expanduser("~/.cache/selenium")
+            ]
+            
+            count = 0
+            for p in paths:
+                if os.path.exists(p):
+                    shutil.rmtree(p)
+                    count += 1
+            
+            messagebox.showinfo("Success", "Cache cleared successfully.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to clear cache: {e}")
+
     def _init_dashboard(self):
         frame = self.tab_dashboard
         
         self.status_label = ctk.CTkLabel(frame, text="Status: Unknown", font=("Roboto", 18))
         self.status_label.pack(pady=20)
         
-        self.verify_btn = ctk.CTkButton(frame, text="Verify / Login Now", command=self.run_verify, height=40)
+        self.verify_btn = ctk.CTkButton(frame, text="Verify / Login Now", command=self.run_verify, height=40, state="disabled")
         self.verify_btn.pack(pady=10)
         
         self.btn_launch = ctk.CTkButton(frame, text="Launch Website (Logged In)", command=self.launch_browser_session, fg_color="green", height=40)
@@ -44,13 +71,29 @@ class MainViewFrame(ctk.CTkFrame):
 
         # Periodically update status label
         self.after(2000, self.update_status)
+        self.after(800, self.attempt_initial_login)
 
     def update_status(self):
+        # Check credentials availability
+        if not self.is_verifying:
+            creds = self.controller.storage.get_credentials()
+            has_creds = creds and creds.get('roll_number') and creds.get('erp_password') and creds.get('security_answers')
+            if has_creds:
+                 self.verify_btn.configure(state="normal")
+            else:
+                 self.verify_btn.configure(state="disabled")
+
         alive = self.controller.client.is_session_alive()
         text = "Status: Online (Logged In)" if alive else "Status: Offline (Logged Out)"
         color = "green" if alive else "red"
         self.status_label.configure(text=text, text_color=color)
         self.after(5000, self.update_status)
+
+    def attempt_initial_login(self):
+        creds = self.controller.storage.get_credentials()
+        has_creds = creds and creds.get('roll_number') and creds.get('erp_password') and creds.get('security_answers')
+        if has_creds:
+            self.run_verify()
 
     def log(self, message):
         # Log to terminal
@@ -63,6 +106,7 @@ class MainViewFrame(ctk.CTkFrame):
         self.log_text.see("end")
 
     def run_verify(self):
+        self.is_verifying = True
         self.verify_btn.configure(state="disabled")
         self.log("Starting Login/Verify Process...")
         
@@ -86,9 +130,14 @@ class MainViewFrame(ctk.CTkFrame):
             except Exception as e:
                 self.log(f"Process complete: Error ({e})")
             finally:
-                self.after(0, lambda: self.verify_btn.configure(state="normal"))
+                self.after(0, lambda: self._reset_verify_btn())
         
         threading.Thread(target=task, daemon=True).start()
+
+    def _reset_verify_btn(self):
+        self.is_verifying = False
+        # State will be updated by next update_status loop or we can force check
+        self.update_status()
 
     def _init_settings(self):
         # Use a ScrollableFrame to ensure everything fits
@@ -107,7 +156,7 @@ class MainViewFrame(ctk.CTkFrame):
         self.entry_roll = ctk.CTkEntry(roll_frame, placeholder_text="Roll Number")
         self.entry_roll.pack(side="left", fill="x", expand=True, padx=(0, 10))
         
-        self.btn_fetch = ctk.CTkButton(roll_frame, text="Fetch Qs", width=80, command=self.run_fetch_questions)
+        self.btn_fetch = ctk.CTkButton(roll_frame, text="Fetch Security Questions", width=200, command=self.run_fetch_questions)
         self.btn_fetch.pack(side="right")
         
         self.entry_pass = ctk.CTkEntry(frame, placeholder_text="ERP Password", show="*")
@@ -115,7 +164,7 @@ class MainViewFrame(ctk.CTkFrame):
 
         # --- Security Questions ---
         ctk.CTkLabel(frame, text="Security Questions", font=("Roboto", 16, "bold")).pack(pady=(20, 5), anchor="w", padx=10)
-        self.lbl_sec_hint = ctk.CTkLabel(frame, text="Click 'Fetch Qs' to load questions automatically.", font=("Roboto", 12))
+        self.lbl_sec_hint = ctk.CTkLabel(frame, text="Click 'Fetch Security Questions' to load questions automatically.", font=("Roboto", 12))
         self.lbl_sec_hint.pack(pady=(0, 10), anchor="w", padx=10)
 
         self.qa_entries = []
@@ -138,11 +187,24 @@ class MainViewFrame(ctk.CTkFrame):
         self.entry_email = ctk.CTkEntry(frame, placeholder_text="Gmail Address (registered with ERP)")
         self.entry_email.pack(pady=5, padx=10, fill="x")
         
-        self.entry_app_pass = ctk.CTkEntry(frame, placeholder_text="Google App Password (16 chars)", show="*")
-        self.entry_app_pass.pack(pady=5, padx=10, fill="x")
+        # App Password + Help Button
+        pass_frame = ctk.CTkFrame(frame, fg_color="transparent")
+        pass_frame.pack(pady=5, padx=10, fill="x")
+
+        self.entry_app_pass = ctk.CTkEntry(pass_frame, placeholder_text="Google App Password (16 chars)", show="*")
+        self.entry_app_pass.pack(side="left", fill="x", expand=True, padx=(0, 10))
+        
+        self.btn_help = ctk.CTkButton(pass_frame, text="?", width=40, command=self.open_google_help, fg_color="#666666", hover_color="#444444")
+        self.btn_help.pack(side="right")
         
         self.save_btn = ctk.CTkButton(frame, text="Save To Vault", command=self.save_settings, height=40)
         self.save_btn.pack(pady=30, padx=10, fill="x")
+        
+        # --- Troubleshooting ---
+        ctk.CTkLabel(frame, text="Troubleshooting", font=("Roboto", 16, "bold")).pack(pady=(20, 5), anchor="w", padx=10)
+        
+        self.btn_clear_cache = ctk.CTkButton(frame, text="Clear Browser Cache/Drivers", command=self.run_clear_cache, fg_color="#555555", hover_color="#333333")
+        self.btn_clear_cache.pack(pady=10, padx=10, fill="x")
         
         # Load existing
         self.load_settings()
@@ -165,7 +227,7 @@ class MainViewFrame(ctk.CTkFrame):
             except Exception as e:
                 self.after(0, lambda: messagebox.showerror("Error", f"Fetch failed: {e}"))
             finally:
-                self.after(0, lambda: self.btn_fetch.configure(state="normal", text="Fetch Qs"))
+                self.after(0, lambda: self.btn_fetch.configure(state="normal", text="Fetch Security Questions"))
                 
         threading.Thread(target=task, daemon=True).start()
 
@@ -189,37 +251,56 @@ class MainViewFrame(ctk.CTkFrame):
                      self.after(0, lambda: messagebox.showerror("Error", "Session tokens missing from active session."))
                      return
 
-                # Launch Chrome in App Mode (no address bar)
-                options = webdriver.ChromeOptions()
-                options.add_argument("--app=https://erp.iitkgp.ac.in/")
-                options.add_argument("--start-maximized")
+                # Check if browser is already running
+                if hasattr(self, 'browser_page') and self.browser_page:
+                    try:
+                        if self.browser_page.process_id:
+                            self.after(0, lambda: self.log("Opening new tab in existing session..."))
+                            tab = self.browser_page.new_tab()
+                            tab.set.cookies({'ssoToken': sso, 'JSID#/IIT_ERP3': jsid})
+                            tab.get("https://erp.iitkgp.ac.in/IIT_ERP3/")
+                            return
+                    except Exception:
+                        self.browser_page = None
+
+                # Configure DrissionPage
+                co = ChromiumOptions()
+                # Launch in App Mode (no address bar)
+                co.set_argument("--app=https://erp.iitkgp.ac.in/")
+                co.set_argument("--start-maximized")
                 
-                # Turn off "Chrome is being controlled by automated test software" bar
-                options.add_experimental_option("excludeSwitches", ["enable-automation"])
-                options.add_experimental_option('useAutomationExtension', False)
+                # Initialize Page (controls the browser)
+                page = ChromiumPage(addr_or_opts=co)
                 
-                driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+                # Navigate to base to ensure cookie domain scope matches
+                page.get("https://erp.iitkgp.ac.in/")
                 
-                # Navigate to domain to set cookies
-                driver.get("https://erp.iitkgp.ac.in/")
+                # Inject Cookies
+                # DrissionPage accepts a simple dict for cookies
+                page.set.cookies({'ssoToken': sso, 'JSID#/IIT_ERP3': jsid})
                 
-                # Inject cookies. Note: domain should match exactly or be superdomain.
-                driver.add_cookie({'name': 'ssoToken', 'value': sso, 'domain': 'erp.iitkgp.ac.in', 'path': '/'})
-                driver.add_cookie({'name': 'JSID#/IIT_ERP3', 'value': jsid, 'domain': 'erp.iitkgp.ac.in', 'path': '/'})
-                
-                # Navigate to authenticated homepage
-                driver.get("https://erp.iitkgp.ac.in/IIT_ERP3/")
+                # Navigate to Authenticated Dashboard
+                page.get("https://erp.iitkgp.ac.in/IIT_ERP3/")
                 
                 self.after(0, lambda: self.log("Browser launched with session."))
                 
-                # Keep active
-                self.browser_driver = driver
+                # Keep reference to prevent garbage collection issues if any
+                self.browser_page = page
                 
             except Exception as e:
-                self.after(0, lambda: self.log(f"Browser launch failed: {e}"))
-                self.after(0, lambda: messagebox.showerror("Launch Error", f"Could not launch browser: {e}"))
+                err_msg = str(e)
+                self.after(0, lambda: self.log(f"Browser launch failed: {err_msg}"))
+                self.after(0, lambda: messagebox.showerror("Launch Error", f"Could not launch browser: {err_msg}"))
 
         threading.Thread(target=task, daemon=True).start()
+
+    def cleanup(self):
+        if hasattr(self, 'browser_page') and self.browser_page:
+            try:
+                self.log("Closing browser session...")
+                self.browser_page.quit()
+            except Exception:
+                pass
 
     def populate_questions(self, questions):
         # Clear existing

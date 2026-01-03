@@ -27,6 +27,7 @@ class ERPApp(ctk.CTk):
 
         self.title("IIT KGP ERP Manager")
         self.geometry("800x600")
+        self.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         # Set Icon
         try:
@@ -103,7 +104,8 @@ class ERPApp(ctk.CTk):
         thread.start()
         
     def _auto_login_loop(self):
-        print("Auto-login service started")
+        print("Auto-login service started (Delayed 15s)")
+        time.sleep(15) # Give UI time to perform initial login/launch
         while True:
             try:
                 if not self.client.is_session_alive():
@@ -125,3 +127,14 @@ class ERPApp(ctk.CTk):
             
             time.sleep(60) # Check every minute
 
+    def on_closing(self):
+        # Cleanup current frame if it has logic
+        if self.current_frame and hasattr(self.current_frame, "cleanup"):
+            try:
+                self.current_frame.cleanup()
+            except Exception as e:
+                print(f"Error during cleanup: {e}")
+        
+        # Kill app
+        self.destroy()
+        sys.exit(0)
